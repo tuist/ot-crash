@@ -1,0 +1,73 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    ports:
+      - '5432:5432'
+    volumes: 
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgweb:
+    container_name: pgweb  
+    restart: always  
+    image: sosedoff/pgweb
+    ports:
+      - "8081:8081"
+    links:
+      - db:db  
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:postgres@db:5432/postgres?sslmode=disable
+    depends_on:
+      - db 
+
+  ot_crash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MIX_ENV: prod
+    depends_on:
+      - db
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "443:443"
+    expose:
+      - "80"
+      - "8080"
+      - "443:443"
+    environment:
+      SECRET_KEY_BASE: "1234"
+      MIX_ENV: "prod"
+      OTLP_ENDPOINT: otel-collector:4317
+      DATABASE_URL: postgres://postgres:postgres@db:5432/postgres?sslmode=disable
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    restart: always
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "1888:1888"   # pprof extension
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "4317:4317"   # OTLP gRPC receiver
+      - "55679:55679" # zpages extension
+    # depends_on:
+    #   - jaeger-all-in-one
+    #   - zipkin-all-in-one
+volumes:
+  db:
+    driver: local
